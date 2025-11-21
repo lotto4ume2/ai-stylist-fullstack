@@ -95,6 +95,51 @@ export const itemsApi = {
     );
     return response.data;
   },
+
+  toggleFavorite: async (itemId: string): Promise<{ message: string; is_favorite: boolean }> => {
+    const response = await api.post<{ message: string; is_favorite: boolean }>(
+      `/api/items/${itemId}/favorite`
+    );
+    return response.data;
+  },
+
+  search: async (params: {
+    query?: string;
+    category?: string;
+    color?: string;
+    brand?: string;
+    is_favorite?: boolean;
+  }): Promise<ItemsResponse> => {
+    const response = await api.get<ItemsResponse>('/api/items/search', { params });
+    return response.data;
+  },
+};
+
+// AI Recommendations API
+export const recommendationsApi = {
+  getOutfits: async (params?: {
+    occasion?: string;
+    weather?: string;
+    style_preference?: string;
+  }): Promise<any> => {
+    const response = await api.post('/api/recommendations/outfits', null, { params });
+    return response.data;
+  },
+
+  analyzeCloset: async (): Promise<any> => {
+    const response = await api.get('/api/recommendations/closet-analysis');
+    return response.data;
+  },
+};
+
+// Weather API
+export const weatherApi = {
+  getRecommendations: async (location?: string): Promise<any> => {
+    const response = await api.get('/api/weather/recommendations', {
+      params: location ? { location } : undefined,
+    });
+    return response.data;
+  },
 };
 
 export default api;

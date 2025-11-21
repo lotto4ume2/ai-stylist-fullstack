@@ -9,6 +9,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 import os
+from ai_recommendations import generate_outfit_recommendation, analyze_closet_gaps, get_style_advice
+from advanced_features import get_weather_recommendation, search_items, get_outfit_statistics, suggest_seasonal_items
+from social_features import create_shareable_outfit, create_outfit_plan, get_upcoming_outfit_plans, record_outfit_worn, generate_outfit_inspiration
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from datetime import datetime, timedelta
@@ -367,6 +370,370 @@ async def delete_clothing_item(item_id: str, current_user: dict = Depends(get_cu
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete item: {str(e)}"
+        )
+
+
+@app.post("/api/recommendations/outfits")
+async def get_outfit_recommendations(
+    occasion: Optional[str] = None,
+    weather: Optional[str] = None,
+    style_preference: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get AI-powered outfit recommendations based on user's closet items.
+    
+    Requires JWT authentication.
+    """
+    try:
+        # Get user's clothing items
+        response = supabase.table("clothing_items").select("*").eq(
+            "user_id", current_user["user_id"]
+        ).execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No clothing items found. Please add items to your closet first."
+            )
+        
+        # Generate recommendations
+        recommendations = generate_outfit_recommendation(
+            items=response.data,
+            occasion=occasion,
+            weather=weather,
+            style_preference=style_preference
+        )
+        
+        return recommendations
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate recommendations: {str(e)}"
+        )
+
+
+@app.post("/api/items/{item_id}/favorite")
+async def toggle_favorite(item_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    Toggle favorite status for a clothing item.
+    """
+    try:
+        # Get current item
+        item_response = supabase.table("clothing_items").select("*").eq(
+            "id", item_id
+        ).eq("user_id", current_user["user_id"]).execute()
+        
+        if not item_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Item not found"
+            )
+        
+        current_favorite = item_response.data[0].get('is_favorite', False)
+        
+        # Toggle favorite
+        supabase.table("clothing_items").update({
+            "is_favorite": not current_favorite
+        }).eq("id", item_id).execute()
+        
+        return {
+            "message": "Favorite status updated",
+            "is_favorite": not current_favorite
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update favorite: {str(e)}"
+        )
+
+
+@app.get("/api/items/search")
+async def search_clothing_items(
+    query: Optional[str] = None,
+    category: Optional[str] = None,
+    color: Optional[str] = None,
+    brand: Optional[str] = None,
+    is_favorite: Optional[bool] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Search and filter clothing items.
+    """
+    try:
+        # Get all user items
+        response = supabase.table("clothing_items").select("*").eq(
+            "user_id", current_user["user_id"]
+        ).execute()
+        
+        # Apply filters
+        filtered_items = search_items(
+            items=response.data,
+            query=query,
+            category=category,
+            color=color,
+            brand=brand,
+            is_favorite=is_favorite
+        )
+        
+        return {
+            "items": filtered_items,
+            "count": len(filtered_items),
+            "filters_applied": {
+                "query": query,
+                "category": category,
+                "color": color,
+                "brand": brand,
+                "is_favorite": is_favorite
+            }
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search failed: {str(e)}"
+        )
+
+
+@app.get("/api/weather/recommendations")
+async def get_weather_based_recommendations(
+    location: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get weather-based clothing recommendations.
+    """
+    try:
+        weather_data = get_weather_recommendation(location=location)
+        return weather_data
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get weather recommendations: {str(e)}"
+        )
+
+
+@app.get("/api/recommendations/closet-analysis")
+async def analyze_closet(current_user: dict = Depends(get_current_user)):
+    """
+    Analyze user's closet and suggest missing items or gaps.
+    
+    Requires JWT authentication.
+    """
+    try:
+        # Get user's clothing items
+        response = supabase.table("clothing_items").select("*").eq(
+            "user_id", current_user["user_id"]
+        ).execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No clothing items found. Please add items to your closet first."
+            )
+        
+        # Analyze closet
+        analysis = analyze_closet_gaps(response.data)
+        
+        return analysis
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to analyze closet: {str(e)}"
+        )
+
+
+@app.post("/api/outfits/share")
+async def share_outfit(
+    outfit_name: str,
+    item_ids: List[str],
+    description: Optional[str] = None,
+    is_public: bool = True,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create a shareable outfit link.
+    """
+    try:
+        # Create shareable outfit data
+        outfit_data = create_shareable_outfit(
+            user_id=current_user["user_id"],
+            outfit_name=outfit_name,
+            item_ids=item_ids,
+            description=description,
+            is_public=is_public
+        )
+        
+        # Save to database
+        db_response = supabase.table("shared_outfits").insert(outfit_data).execute()
+        
+        share_url = f"{SUPABASE_URL}/share/{outfit_data['share_token']}"
+        
+        return {
+            "message": "Outfit shared successfully",
+            "share_token": outfit_data['share_token'],
+            "share_url": share_url,
+            "outfit": db_response.data[0] if db_response.data else outfit_data
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to share outfit: {str(e)}"
+        )
+
+
+@app.get("/api/outfits/share/{share_token}")
+async def get_shared_outfit(share_token: str):
+    """
+    Get a shared outfit by its token (public endpoint).
+    """
+    try:
+        response = supabase.table("shared_outfits").select("*").eq(
+            "share_token", share_token
+        ).eq("is_public", True).execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Shared outfit not found"
+            )
+        
+        # Increment view count
+        supabase.table("shared_outfits").update({
+            "view_count": response.data[0].get('view_count', 0) + 1
+        }).eq("share_token", share_token).execute()
+        
+        return response.data[0]
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve shared outfit: {str(e)}"
+        )
+
+
+@app.post("/api/outfits/plan")
+async def plan_outfit(
+    outfit_name: str,
+    item_ids: List[str],
+    planned_date: Optional[str] = None,
+    occasion: Optional[str] = None,
+    notes: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create an outfit plan for a future date.
+    """
+    try:
+        from datetime import date
+        
+        plan_date = None
+        if planned_date:
+            try:
+                plan_date = date.fromisoformat(planned_date)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid date format. Use YYYY-MM-DD"
+                )
+        
+        # Create outfit plan
+        plan_data = create_outfit_plan(
+            user_id=current_user["user_id"],
+            outfit_name=outfit_name,
+            item_ids=item_ids,
+            planned_date=plan_date,
+            occasion=occasion,
+            notes=notes
+        )
+        
+        # Save to database
+        db_response = supabase.table("outfit_plans").insert(plan_data).execute()
+        
+        return {
+            "message": "Outfit plan created successfully",
+            "plan": db_response.data[0] if db_response.data else plan_data
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create outfit plan: {str(e)}"
+        )
+
+
+@app.get("/api/outfits/plans")
+async def get_outfit_plans(current_user: dict = Depends(get_current_user)):
+    """
+    Get all outfit plans for the authenticated user.
+    """
+    try:
+        response = supabase.table("outfit_plans").select("*").eq(
+            "user_id", current_user["user_id"]
+        ).order("planned_date", desc=False).execute()
+        
+        return {
+            "plans": response.data,
+            "count": len(response.data)
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve outfit plans: {str(e)}"
+        )
+
+
+@app.get("/api/inspiration")
+async def get_outfit_inspiration(
+    theme: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get outfit inspiration based on user's closet.
+    """
+    try:
+        # Get user's items
+        response = supabase.table("clothing_items").select("*").eq(
+            "user_id", current_user["user_id"]
+        ).execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No clothing items found. Add items to get inspiration!"
+            )
+        
+        # Generate inspiration
+        inspirations = generate_outfit_inspiration(response.data, theme=theme)
+        
+        return {
+            "inspirations": inspirations,
+            "count": len(inspirations),
+            "theme": theme
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate inspiration: {str(e)}"
         )
 
 
